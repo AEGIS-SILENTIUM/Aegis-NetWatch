@@ -105,16 +105,44 @@ nano configs/config.yaml
 ```
 
 **Find your Wi-Fi interface name:**
+
+> `ip link show` does NOT work in Termux — use one of these instead:
+
 ```bash
-ip link show
-# Look for: wlan0, wlan1, rmnet_data0, etc.
+# Option 1: ifconfig (install if missing: pkg install net-tools)
+ifconfig
+
+# Option 2: always works — reads kernel proc filesystem
+cat /proc/net/dev | awk 'NR>2{print $1}' | tr -d ':'
+
+# Option 3: Python one-liner (no extra packages needed)
+python3 -c "
+import os
+for i in sorted(os.listdir('/sys/class/net')):
+    mac = open(f'/sys/class/net/{i}/address').read().strip() if           os.path.exists(f'/sys/class/net/{i}/address') else '?'
+    print(f'  {i:15} {mac}')
+"
 ```
+
+Common Termux interface names: `wlan0`, `wlan1`, `swlan0`, `rmnet_data0`
 
 **Find your network subnet:**
 ```bash
-ip addr show wlan0
-# Example output: inet 192.168.1.105/24
-# Your subnet = 192.168.1.0/24
+# Option 1: ifconfig
+ifconfig wlan0
+
+# Option 2: Python (reads /proc/net/fib_trie)
+python3 -c "
+import socket, struct, fcntl
+iface = 'wlan0'   # replace with your interface
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+ip = socket.inet_ntoa(fcntl.ioctl(s, 0x8915, struct.pack('256s', iface[:15].encode()))[20:24])
+nm = socket.inet_ntoa(fcntl.ioctl(s, 0x891b, struct.pack('256s', iface[:15].encode()))[20:24])
+import ipaddress
+print('IP:    ', ip)
+print('Subnet:', ipaddress.ip_network(f'{ip}/{nm}', strict=False))
+s.close()
+"
 ```
 
 **Minimum config settings to edit:**
@@ -218,13 +246,17 @@ chmod +x ~/.termux/boot/netwatch.sh
 python netwatch.py --no-traffic --no-dns
 ```
 
-### "Interface not found"
+### "Interface not found" / "ip link show: Permission denied"
+
+`ip link show` does not work in Termux. Use instead:
 ```bash
-# List all interfaces
-ip link show
-# Try common Termux interface names:
-# wlan0, wlan1, swlan0, rmnet_data0
+# List all interfaces (no root needed)
+cat /proc/net/dev | awk 'NR>2{print $1}' | tr -d ':'
+
+# Or with Python
+python3 -c "import os; [print(i) for i in os.listdir('/sys/class/net')]"
 ```
+Common names: `wlan0`, `wlan1`, `swlan0`, `rmnet_data0`
 
 ### "nmap not found"
 ```bash
