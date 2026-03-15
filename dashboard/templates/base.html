@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}NetWatch{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+  <nav class="sidebar">
+    <div class="brand">
+      <span class="brand-icon">🛰</span>
+      <span class="brand-name">NetWatch</span>
+    </div>
+    <ul class="nav-links">
+      <li><a href="/"         class="nav-link {% if request.path == '/' %}active{% endif %}">
+        <span>📊</span> Dashboard
+      </a></li>
+      <li><a href="/devices"  class="nav-link {% if '/devices' in request.path %}active{% endif %}">
+        <span>💻</span> Devices
+      </a></li>
+      <li><a href="/traffic"  class="nav-link {% if '/traffic' in request.path %}active{% endif %}">
+        <span>🌊</span> Traffic
+      </a></li>
+      <li><a href="/dns"      class="nav-link {% if '/dns' in request.path %}active{% endif %}">
+        <span>🔍</span> DNS Log
+      </a></li>
+      <li><a href="/alerts"   class="nav-link {% if '/alerts' in request.path %}active{% endif %}">
+        <span>🚨</span> Alerts
+        <span id="nav-alert-badge" class="badge hidden">0</span>
+      </a></li>
+      <li><a href="/collector" class="nav-link {% if '/collector' in request.path %}active{% endif %}">
+        <span>📁</span> Collector
+      </a></li>
+    </ul>
+    <div class="sidebar-footer">
+      <span id="connection-status" class="status-dot offline"></span>
+      <span id="connection-text">Connecting...</span>
+    </div>
+  </nav>
+
+  <main class="content">
+    <div class="topbar">
+      <h1 class="page-title">{% block page_title %}{% endblock %}</h1>
+      <div class="topbar-right">
+        <span id="last-scan" class="text-muted small"></span>
+        <span class="separator">|</span>
+        <span id="active-device-count" class="stat-chip">— devices</span>
+        <span id="unacked-alert-count" class="stat-chip alert-chip hidden">— alerts</span>
+      </div>
+    </div>
+    <div class="page-body">
+      {% block content %}{% endblock %}
+    </div>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="/static/js/main.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}NetWatch — Alerts{% endblock %}
+{% block page_title %}Alerts{% endblock %}
+{% block content %}
+<div class="filter-bar">
+  <select id="sev-filter">
+    <option value="">All Severities</option>
+    <option value="CRITICAL">Critical</option>
+    <option value="HIGH">High</option>
+    <option value="MEDIUM">Medium</option>
+    <option value="LOW">Low</option>
+  </select>
+  <select id="cat-filter">
+    <option value="">All Categories</option>
+    <option value="new_device">New Device</option>
+    <option value="port_scan">Port Scan</option>
+    <option value="bandwidth_spike">Bandwidth Spike</option>
+    <option value="dns_anomaly">DNS Anomaly</option>
+    <option value="insecure_protocol">Insecure Protocol</option>
+  </select>
+  <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#8b949e;cursor:pointer">
+    <input type="checkbox" id="unacked-only" checked> Unacknowledged only
+  </label>
+  <button class="btn btn-sm" onclick="loadAlerts()">↻ Refresh</button>
+  <button class="btn btn-sm" onclick="ackAll()" style="margin-left:auto">✓ Ack All</button>
+</div>
+
+<div id="alerts-list">
+  <div class="loading">Loading alerts...</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let _allAlerts = [];
+
+async function loadAlerts() {
+  const unacked = document.getElementById('unacked-only').checked;
+  const url     = `/api/alerts?limit=200${unacked?'&unacked=true':''}`;
+  const res     = await fetch(url);
+  const data    = await res.json();
+  _allAlerts    = data.alerts;
+  renderAlerts();
+}
+
+function renderAlerts() {
+  const sev  = document.getElementById('sev-filter').value;
+  const cat  = document.getElementById('cat-filter').value;
+  const list = _allAlerts.filter(a => {
+    if (sev && a.severity  !== sev) return false;
+    if (cat && a.category  !== cat) return false;
+    return true;
+  });
+
+  const container = document.getElementById('alerts-list');
+  container.innerHTML = list.map(a => `
+    <div class="card" style="padding:16px;margin-bottom:12px;border-left:4px solid ${sevColor(a.severity)}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+            <span class="badge badge-${a.severity.toLowerCase()}">${a.severity}</span>
+            <span class="tag">${a.category.replace('_',' ')}</span>
+            <span class="text-muted small">${timeAgo(a.timestamp)}</span>
+            ${a.device_ip ? `<code>${a.device_ip}</code>` : ''}
+            ${a.acknowledged ? '<span class="text-muted small">✓ Acknowledged</span>' : ''}
+          </div>
+          <div style="font-weight:600;margin-bottom:4px">${escapeHtml(a.title)}</div>
+          <div class="text-muted small" style="white-space:pre-line">${escapeHtml(a.description||'')}</div>
+        </div>
+        ${!a.acknowledged ? `<button class="btn btn-sm" onclick="ackAlert(${a.id},this)">✓ Ack</button>` : ''}
+      </div>
+    </div>
+  `).join('') || '<div class="card empty">No alerts found 🎉</div>';
+}
+
+function sevColor(s) {
+  return {CRITICAL:'#f85149',HIGH:'#e3954b',MEDIUM:'#d29922',LOW:'#58a6ff'}[s]||'#30363d';
+}
+
+async function ackAlert(id, btn) {
+  await fetch(`/api/alerts/${id}/acknowledge`, {method:'POST'});
+  btn.closest('.card').style.opacity = '0.5';
+  btn.disabled = true;
+  btn.textContent = '✓ Done';
+  loadAlerts();
+}
+
+async function ackAll() {
+  const unacked = _allAlerts.filter(a => !a.acknowledged);
+  await Promise.all(unacked.map(a => fetch(`/api/alerts/${a.id}/acknowledge`, {method:'POST'})));
+  loadAlerts();
+}
+
+loadAlerts();
+['sev-filter','cat-filter','unacked-only'].forEach(id => {
+  document.getElementById(id)?.addEventListener('change', () => {
+    if (id === 'unacked-only') loadAlerts(); else renderAlerts();
+  });
+});
+nwSocket.on('alert_event', loadAlerts);
+setInterval(loadAlerts, 15000);
+</script>
+{% endblock %}

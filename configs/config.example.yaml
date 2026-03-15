@@ -1,0 +1,58 @@
+# NetWatch Configuration — Copy to config.yaml and edit
+
+network:
+  interface: "wlan0"        # Your interface: wlan0, eth0, en0
+  subnet: "192.168.1.0/24" # Your subnet in CIDR notation
+  gateway: "192.168.1.1"   # Your router IP
+
+discovery:
+  interval: 60             # Scan interval in seconds
+  os_fingerprint: true     # OS fingerprinting (slower)
+  port_scan: true          # Port scan discovered devices
+  ports: "21,22,23,25,53,80,443,445,3389,8080,8443"
+
+traffic:
+  enabled: true
+  filter: ""               # BPF filter (empty = all traffic)
+  buffer_size: 10000
+  save_pcap: false
+  pcap_dir: "data/pcaps"
+
+dns:
+  enabled: true
+  server: "192.168.1.1"
+
+collector:
+  enabled: false
+  devices: []
+
+alerts:
+  enabled: true
+  new_device: true
+  port_scan_detection: true
+  bandwidth_spike_mbps: 50
+  dns_anomaly: true
+  webhook_url: ""
+  email:
+    enabled: false
+    smtp_host: "smtp.gmail.com"
+    smtp_port: 587
+    from: ""
+    to: ""
+    password: ""
+
+dashboard:
+  host: "127.0.0.1"
+  port: 8080
+  secret_key: "CHANGE_ME_TO_RANDOM_STRING_32_CHARS"
+  auth_enabled: false
+  username: "admin"
+  password: "changeme"
+
+database:
+  path: "data/netwatch.db"
+  retention_days: 30
+
+logging:
+  level: "INFO"
+  file: "data/netwatch.log"

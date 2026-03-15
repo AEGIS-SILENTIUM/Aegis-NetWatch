@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}NetWatch — DNS Log{% endblock %}
+{% block page_title %}DNS Log{% endblock %}
+{% block content %}
+<div class="grid-2">
+  <div class="card">
+    <div class="card-header"><h2>Top Domains (1h)</h2></div>
+    <div id="top-domains" class="domain-list"></div>
+  </div>
+  <div class="card">
+    <div class="card-header"><h2>Flagged Queries</h2></div>
+    <div id="flagged-list" class="scrollable"></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h2>DNS Query Log</h2>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input id="dns-filter" type="text" placeholder="Filter by domain or IP...">
+      <select id="dns-type-filter">
+        <option value="">All types</option>
+        <option value="A">A</option>
+        <option value="AAAA">AAAA</option>
+        <option value="MX">MX</option>
+        <option value="TXT">TXT</option>
+        <option value="CNAME">CNAME</option>
+      </select>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#8b949e;cursor:pointer">
+        <input type="checkbox" id="flagged-only"> Flagged only
+      </label>
+      <button class="btn btn-sm" onclick="loadDns()">↻ Refresh</button>
+      <a href="/api/export/dns" class="btn btn-sm">⬇ Export</a>
+    </div>
+  </div>
+  <div class="scrollable">
+    <table class="data-table" id="dns-table">
+      <thead><tr>
+        <th>Time</th><th>Source IP</th><th>Domain</th>
+        <th>Type</th><th>Response</th><th>Flag</th>
+      </tr></thead>
+      <tbody id="dns-tbody">
+        <tr><td colspan="6" class="loading">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadDns() {
+  const res   = await fetch('/api/dns?minutes=60&limit=500');
+  const data  = await res.json();
+  const queries = data.queries;
+
+  const search  = document.getElementById('dns-filter').value.toLowerCase();
+  const qtype   = document.getElementById('dns-type-filter').value;
+  const flagged = document.getElementById('flagged-only').checked;
+
+  const filtered = queries.filter(q => {
+    if (flagged && !q.flagged) return false;
+    if (qtype && q.qtype !== qtype) return false;
+    if (search) {
+      if (!`${q.src_ip} ${q.domain}`.toLowerCase().includes(search)) return false;
+    }
+    return true;
+  });
+
+  const tbody = document.getElementById('dns-tbody');
+  tbody.innerHTML = filtered.map(q => `
+    <tr ${q.flagged ? 'style="background:#f851491a"' : ''}>
+      <td class="small text-muted">${timeAgo(q.timestamp)}</td>
+      <td><code>${q.src_ip}</code></td>
+      <td><code>${escapeHtml(q.domain)}</code></td>
+      <td><span class="tag">${q.qtype||'?'}</span></td>
+      <td class="small text-muted">${escapeHtml(q.response)||'—'}</td>
+      <td>${q.flagged ? '<span class="text-red">⚠ Suspicious</span>' : '<span class="text-muted">—</span>'}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="6" class="empty">No DNS queries found</td></tr>';
+}
+
+async function loadTopDomains() {
+  const res  = await fetch('/api/dns/top-domains');
+  const data = await res.json();
+  const top  = data.top_domains;
+  const maxCount = top[0]?.count || 1;
+  document.getElementById('top-domains').innerHTML = top.map(d => `
+    <div class="domain-bar">
+      <div class="domain-name">${escapeHtml(d.domain)}</div>
+      <div class="domain-track"><div class="domain-fill" style="width:${Math.round(d.count/maxCount*100)}%"></div></div>
+      <div class="domain-count">${d.count}</div>
+    </div>
+  `).join('') || '<div class="empty">No data</div>';
+}
+
+async function loadFlagged() {
+  const res  = await fetch('/api/dns/flagged');
+  const data = await res.json();
+  document.getElementById('flagged-list').innerHTML = data.flagged.map(q => `
+    <div style="padding:6px 0;border-bottom:1px solid #21262d;font-size:12px">
+      <span class="text-red">⚠</span> <code>${escapeHtml(q.domain)}</code>
+      <span class="text-muted"> from ${q.src_ip} — ${timeAgo(q.timestamp)}</span>
+    </div>
+  `).join('') || '<div class="empty">No flagged queries 🎉</div>';
+}
+
+loadDns(); loadTopDomains(); loadFlagged();
+['dns-filter','dns-type-filter'].forEach(id => document.getElementById(id)?.addEventListener('change', loadDns));
+document.getElementById('dns-filter').addEventListener('keyup', loadDns);
+document.getElementById('flagged-only').addEventListener('change', loadDns);
+setInterval(() => { loadDns(); loadTopDomains(); loadFlagged(); }, 15000);
+nwSocket.on('dns_event', loadDns);
+</script>
+{% endblock %}

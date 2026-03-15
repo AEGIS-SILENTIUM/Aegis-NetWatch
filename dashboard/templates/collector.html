@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}NetWatch — Collector{% endblock %}
+{% block page_title %}Device Collector{% endblock %}
+{% block content %}
+<div class="card" style="border-color:#d29922">
+  <strong>⚠ Authorized Use Only</strong>
+  <p class="text-muted small" style="margin-top:6px">
+    This module collects files from devices via SSH. Only use against devices you own.
+    Configure devices in <code>configs/config.yaml</code> under the <code>collector</code> section.
+  </p>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <div class="card-header">
+      <h2>Configured Devices</h2>
+      <span class="text-muted small">From config.yaml</span>
+    </div>
+    <div id="configured-devices">
+      <div class="text-muted">Loading config...</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header"><h2>Collection Summary</h2></div>
+    <div id="collection-summary" class="text-muted">Loading...</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h2>Collected Files</h2>
+    <a href="#" onclick="triggerCollection()" class="btn btn-primary btn-sm">▶ Run Now</a>
+  </div>
+  <div class="scrollable">
+    <table class="data-table" id="files-table">
+      <thead><tr>
+        <th>Time</th><th>Device</th><th>Remote Path</th>
+        <th>Local Path</th><th>Size</th><th>Status</th>
+      </tr></thead>
+      <tbody id="files-tbody">
+        <tr><td colspan="6" class="loading">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadFiles() {
+  const res  = await fetch('/api/collector/files');
+  const data = await res.json();
+  const files = data.files;
+
+  const success = files.filter(f=>f.success).length;
+  const failed  = files.filter(f=>!f.success).length;
+  const total   = files.reduce((s,f)=>s+f.size_bytes,0);
+
+  document.getElementById('collection-summary').innerHTML = `
+    <div class="detail-grid" style="grid-template-columns:repeat(3,1fr);gap:12px">
+      <div class="stat-card"><div class="stat-value text-green">${success}</div><div class="stat-label">Successful</div></div>
+      <div class="stat-card"><div class="stat-value text-red">${failed}</div><div class="stat-label">Failed</div></div>
+      <div class="stat-card"><div class="stat-value">${formatBytes(total)}</div><div class="stat-label">Total Size</div></div>
+    </div>
+  `;
+
+  document.getElementById('files-tbody').innerHTML = files.map(f => `
+    <tr>
+      <td class="small text-muted">${timeAgo(f.timestamp)}</td>
+      <td><strong>${escapeHtml(f.device_name)}</strong> <span class="text-muted small">${f.device_host}</span></td>
+      <td><code class="small">${escapeHtml(f.remote_path)}</code></td>
+      <td><code class="small text-muted">${escapeHtml(f.local_path)}</code></td>
+      <td class="mono">${formatBytes(f.size_bytes)}</td>
+      <td>${f.success
+        ? '<span class="text-green">✓ OK</span>'
+        : `<span class="text-red" title="${escapeHtml(f.error_msg)}">✗ Failed</span>`
+      }</td>
+    </tr>
+  `).join('') || '<tr><td colspan="6" class="empty">No files collected yet. Configure devices in config.yaml and run collection.</td></tr>';
+}
+
+function triggerCollection() {
+  showToast('Collection triggered — check logs for progress', 'INFO');
+}
+
+document.getElementById('configured-devices').innerHTML = `
+  <p class="text-muted small">
+    Device collection is configured in <code>configs/config.yaml</code> under the
+    <code>collector.devices</code> section. Each device needs:<br><br>
+    • <code>name</code> — friendly name<br>
+    • <code>host</code> — IP address<br>
+    • <code>username</code> — SSH username<br>
+    • <code>key_file</code> — path to your SSH private key<br>
+    • <code>paths</code> — list of remote paths to collect<br><br>
+    Set <code>collector.enabled: true</code> to activate.
+  </p>
+`;
+
+loadFiles();
+setInterval(loadFiles, 30000);
+nwSocket.on('collection.complete', loadFiles);
+</script>
+{% endblock %}

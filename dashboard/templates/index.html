@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}NetWatch — Dashboard{% endblock %}
+{% block page_title %}Overview{% endblock %}
+{% block content %}
+<div class="stat-grid">
+  <div class="stat-card">
+    <div class="stat-value" id="stat-total-devices">—</div>
+    <div class="stat-label">Total Devices</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" id="stat-active-devices">—</div>
+    <div class="stat-label">Active Now</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" id="stat-total-flows">—</div>
+    <div class="stat-label">Traffic Flows</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" id="stat-dns-queries">—</div>
+    <div class="stat-label">DNS Queries</div>
+  </div>
+  <div class="stat-card alert-card">
+    <div class="stat-value" id="stat-unacked-alerts">—</div>
+    <div class="stat-label">Active Alerts</div>
+  </div>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <div class="card-header">
+      <h2>Active Devices</h2>
+      <a href="/devices" class="btn-link">View all →</a>
+    </div>
+    <table class="data-table" id="overview-devices-table">
+      <thead><tr>
+        <th>IP</th><th>MAC</th><th>Hostname</th><th>Vendor</th><th>Last Seen</th>
+      </tr></thead>
+      <tbody id="overview-devices-body">
+        <tr><td colspan="5" class="loading">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h2>Recent Alerts</h2>
+      <a href="/alerts" class="btn-link">View all →</a>
+    </div>
+    <div id="overview-alerts-list">
+      <div class="loading">Loading...</div>
+    </div>
+  </div>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <div class="card-header"><h2>Protocol Breakdown</h2></div>
+    <div class="chart-container">
+      <canvas id="protocol-chart"></canvas>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header"><h2>Top DNS Domains (1h)</h2></div>
+    <div id="top-domains-list" class="domain-list">
+      <div class="loading">Loading...</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadOverview() {
+  // Stats
+  const statusRes = await fetch('/api/status');
+  const status    = await statusRes.json();
+  const s         = status.stats;
+  document.getElementById('stat-total-devices').textContent  = s.total_devices  || 0;
+  document.getElementById('stat-active-devices').textContent = s.active_devices || 0;
+  document.getElementById('stat-total-flows').textContent    = s.total_flows    || 0;
+  document.getElementById('stat-dns-queries').textContent    = s.total_dns      || 0;
+  document.getElementById('stat-unacked-alerts').textContent = s.unacked_alerts || 0;
+
+  // Devices
+  const devRes = await fetch('/api/devices/active');
+  const devData = await devRes.json();
+  const tbody = document.getElementById('overview-devices-body');
+  tbody.innerHTML = devData.devices.slice(0,8).map(d => `
+    <tr onclick="window.location='/devices'" style="cursor:pointer">
+      <td><code>${d.ip || '—'}</code></td>
+      <td><code class="text-muted">${d.mac}</code></td>
+      <td>${d.hostname || '<span class="text-muted">—</span>'}</td>
+      <td>${d.vendor   || '<span class="text-muted">Unknown</span>'}</td>
+      <td class="text-muted small">${timeAgo(d.last_seen)}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="5" class="empty">No active devices</td></tr>';
+
+  // Alerts
+  const alertRes  = await fetch('/api/alerts?limit=5&unacked=true');
+  const alertData = await alertRes.json();
+  const alertList = document.getElementById('overview-alerts-list');
+  alertList.innerHTML = alertData.alerts.map(a => `
+    <div class="alert-item severity-${a.severity.toLowerCase()}">
+      <div class="alert-item-header">
+        <span class="badge badge-${a.severity.toLowerCase()}">${a.severity}</span>
+        <span class="text-muted small">${timeAgo(a.timestamp)}</span>
+      </div>
+      <div class="alert-item-title">${a.title}</div>
+    </div>
+  `).join('') || '<div class="empty">No active alerts 🎉</div>';
+
+  // Protocol chart
+  const protoRes  = await fetch('/api/traffic/protocols?minutes=30');
+  const protoData = await protoRes.json();
+  const protocols = protoData.protocols;
+  renderPieChart('protocol-chart', protocols);
+
+  // Top domains
+  const domRes  = await fetch('/api/dns/top-domains');
+  const domData = await domRes.json();
+  const domList = document.getElementById('top-domains-list');
+  const maxCount = domData.top_domains[0]?.count || 1;
+  domList.innerHTML = domData.top_domains.slice(0,10).map(d => `
+    <div class="domain-bar">
+      <div class="domain-name">${d.domain}</div>
+      <div class="domain-track">
+        <div class="domain-fill" style="width:${Math.round(d.count/maxCount*100)}%"></div>
+      </div>
+      <div class="domain-count">${d.count}</div>
+    </div>
+  `).join('') || '<div class="empty">No DNS data yet</div>';
+}
+
+loadOverview();
+setInterval(loadOverview, 15000);
+
+// Live updates
+nwSocket.on('alert_event', () => loadOverview());
+nwSocket.on('scan_complete', () => loadOverview());
+</script>
+{% endblock %}

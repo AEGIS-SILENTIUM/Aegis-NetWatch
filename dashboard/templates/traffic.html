@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}NetWatch — Traffic{% endblock %}
+{% block page_title %}Traffic Monitor{% endblock %}
+{% block content %}
+<div class="stat-grid" style="grid-template-columns:repeat(4,1fr)">
+  <div class="stat-card"><div class="stat-value" id="t-total-flows">—</div><div class="stat-label">Flows (5m)</div></div>
+  <div class="stat-card"><div class="stat-value" id="t-total-bytes">—</div><div class="stat-label">Data (5m)</div></div>
+  <div class="stat-card"><div class="stat-value" id="t-unique-src">—</div><div class="stat-label">Active Sources</div></div>
+  <div class="stat-card"><div class="stat-value" id="t-unique-dst">—</div><div class="stat-label">Unique Destinations</div></div>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <div class="card-header"><h2>Protocol Breakdown (5m)</h2></div>
+    <div class="chart-container"><canvas id="proto-chart"></canvas></div>
+  </div>
+  <div class="card">
+    <div class="card-header"><h2>Top Talkers (5m)</h2></div>
+    <div id="top-talkers-list" class="domain-list"></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h2>Live Traffic Flows</h2>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input id="flow-filter" type="text" placeholder="Filter flows..." style="background:#21262d;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:5px 10px;font-size:13px;width:200px">
+      <button class="btn btn-sm" onclick="loadFlows()">↻ Refresh</button>
+    </div>
+  </div>
+  <div class="scrollable">
+    <table class="data-table" id="flows-table">
+      <thead><tr>
+        <th>Time</th><th>Source</th><th>Destination</th>
+        <th>Protocol</th><th>Service</th><th>Bytes</th><th>Packets</th>
+      </tr></thead>
+      <tbody id="flows-tbody">
+        <tr><td colspan="7" class="loading">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadFlows() {
+  const res  = await fetch('/api/traffic/flows?minutes=5&limit=200');
+  const data = await res.json();
+  const flows = data.flows;
+
+  // Stats
+  const totalBytes = flows.reduce((s,f)=>s+f.bytes_sent,0);
+  const srcSet = new Set(flows.map(f=>f.src_ip));
+  const dstSet = new Set(flows.map(f=>f.dst_ip));
+  document.getElementById('t-total-flows').textContent   = flows.length;
+  document.getElementById('t-total-bytes').textContent   = formatBytes(totalBytes);
+  document.getElementById('t-unique-src').textContent    = srcSet.size;
+  document.getElementById('t-unique-dst').textContent    = dstSet.size;
+
+  // Table
+  const filter = document.getElementById('flow-filter').value.toLowerCase();
+  const tbody  = document.getElementById('flows-tbody');
+  tbody.innerHTML = flows.filter(f =>
+    !filter || `${f.src_ip} ${f.dst_ip} ${f.protocol} ${f.service}`.toLowerCase().includes(filter)
+  ).map(f => `
+    <tr>
+      <td class="small text-muted">${timeAgo(f.timestamp)}</td>
+      <td><code>${f.src_ip}${f.src_port?':'+f.src_port:''}</code></td>
+      <td><code>${f.dst_ip}${f.dst_port?':'+f.dst_port:''}</code></td>
+      <td><span class="tag">${escapeHtml(f.protocol)||'—'}</span></td>
+      <td>${escapeHtml(f.service)||'<span class="text-muted">—</span>'}</td>
+      <td class="mono">${formatBytes(f.bytes_sent)}</td>
+      <td class="text-muted">${f.packets}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="7" class="empty">No flows in last 5 minutes</td></tr>';
+}
+
+async function loadCharts() {
+  // Protocol breakdown
+  const protoRes = await fetch('/api/traffic/protocols?minutes=5');
+  const proto    = await protoRes.json();
+  renderPieChart('proto-chart', proto.protocols);
+
+  // Top talkers
+  const ttRes  = await fetch('/api/traffic/top-talkers');
+  const ttData = await ttRes.json();
+  const talkers = ttData.top_talkers;
+  const maxBytes = talkers[0]?.bytes || 1;
+  document.getElementById('top-talkers-list').innerHTML = talkers.map(t => `
+    <div class="domain-bar">
+      <div class="domain-name"><code>${t.ip}</code></div>
+      <div class="domain-track"><div class="domain-fill" style="width:${Math.round(t.bytes/maxBytes*100)}%"></div></div>
+      <div class="domain-count">${formatBytes(t.bytes)}</div>
+    </div>
+  `).join('') || '<div class="empty">No traffic data</div>';
+}
+
+loadFlows();
+loadCharts();
+document.getElementById('flow-filter').addEventListener('keyup', loadFlows);
+setInterval(() => { loadFlows(); loadCharts(); }, 10000);
+nwSocket.on('flow_event', () => {});  // update on each flow — batched by interval instead
+</script>
+{% endblock %}

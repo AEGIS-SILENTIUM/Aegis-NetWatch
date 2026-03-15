@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+{% block title %}NetWatch — Devices{% endblock %}
+{% block page_title %}Devices{% endblock %}
+{% block content %}
+
+<div class="filter-bar">
+  <input id="dev-search" type="text" placeholder="Search by IP, MAC, hostname, vendor...">
+  <select id="dev-filter-status">
+    <option value="">All Status</option>
+    <option value="active">Active</option>
+    <option value="inactive">Inactive</option>
+  </select>
+  <button class="btn btn-primary" onclick="loadDevices()">↻ Refresh</button>
+</div>
+
+<div id="device-detail-panel" class="device-detail">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <h3 id="detail-title">Device Detail</h3>
+    <button class="btn btn-sm" onclick="closeDetail()">✕ Close</button>
+  </div>
+  <div class="detail-grid" id="detail-grid"></div>
+  <div style="margin-top:16px">
+    <strong>Open Ports:</strong>
+    <div id="detail-ports" style="margin-top:8px"></div>
+  </div>
+  <div style="margin-top:16px">
+    <strong>Recent DNS (last 50):</strong>
+    <div id="detail-dns" class="scrollable" style="margin-top:8px"></div>
+  </div>
+  <div style="margin-top:16px;display:flex;gap:10px;align-items:center">
+    <input id="tag-input" type="text" placeholder="Add tag..." style="background:#21262d;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:6px 10px;font-size:13px;width:160px">
+    <button class="btn btn-sm btn-primary" onclick="addTag()">Add Tag</button>
+    <input id="note-input" type="text" placeholder="Add note..." style="background:#21262d;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:6px 10px;font-size:13px;flex:1">
+    <button class="btn btn-sm btn-primary" onclick="saveNote()">Save Note</button>
+  </div>
+</div>
+
+<div class="card" style="padding:0">
+  <table class="data-table" id="devices-table">
+    <thead><tr>
+      <th>Status</th><th>IP Address</th><th>MAC Address</th>
+      <th>Hostname</th><th>Vendor</th><th>OS</th>
+      <th>Open Ports</th><th>First Seen</th><th>Last Seen</th>
+    </tr></thead>
+    <tbody id="devices-tbody">
+      <tr><td colspan="9" class="loading">Loading...</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <div class="card-header"><h2>Vendor Distribution</h2></div>
+    <div class="chart-container"><canvas id="vendor-chart"></canvas></div>
+  </div>
+  <div class="card">
+    <div class="card-header"><h2>OS Distribution</h2></div>
+    <div class="chart-container"><canvas id="os-chart"></canvas></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let _allDevices = [];
+let _selectedDeviceId = null;
+
+const DANGEROUS_PORTS = [23, 21, 139, 445, 3389];
+
+async function loadDevices() {
+  const res  = await fetch('/api/devices');
+  const data = await res.json();
+  _allDevices = data.devices;
+  renderDevices(_allDevices);
+  renderCharts(_allDevices);
+}
+
+function renderDevices(devs) {
+  const status = document.getElementById('dev-filter-status').value;
+  const search = document.getElementById('dev-search').value.toLowerCase();
+  const filtered = devs.filter(d => {
+    if (status === 'active'   && !d.is_active) return false;
+    if (status === 'inactive' &&  d.is_active) return false;
+    if (search) {
+      const hay = `${d.ip} ${d.mac} ${d.hostname} ${d.vendor} ${d.os_guess}`.toLowerCase();
+      if (!hay.includes(search)) return false;
+    }
+    return true;
+  });
+
+  const tbody = document.getElementById('devices-tbody');
+  tbody.innerHTML = filtered.map(d => {
+    const dot  = d.is_active ? '<span class="online-dot"></span>' : '<span class="offline-dot"></span>';
+    const state = d.is_active ? '<span class="text-green">Active</span>' : '<span class="text-muted">Offline</span>';
+    const ports = (d.open_ports || []).slice(0,4).map(p => {
+      const cls = DANGEROUS_PORTS.includes(p.port) ? 'port-pill dangerous' : 'port-pill';
+      return `<span class="${cls}">${p.port}/${p.proto}</span>`;
+    }).join('') + (d.open_ports?.length > 4 ? `<span class="port-pill">+${d.open_ports.length-4}</span>` : '');
+    return `<tr onclick="showDetail(${d.id})" style="cursor:pointer">
+      <td>${dot}${state}</td>
+      <td><code>${d.ip||'—'}</code></td>
+      <td><code class="text-muted">${d.mac}</code></td>
+      <td>${escapeHtml(d.hostname)||'<span class="text-muted">—</span>'}</td>
+      <td>${escapeHtml(d.vendor)||'<span class="text-muted">Unknown</span>'}</td>
+      <td class="small text-muted">${escapeHtml(d.os_guess)||'—'}</td>
+      <td>${ports||'<span class="text-muted">none</span>'}</td>
+      <td class="small text-muted">${timeAgo(d.first_seen)}</td>
+      <td class="small text-muted">${timeAgo(d.last_seen)}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="9" class="empty">No devices found</td></tr>';
+}
+
+async function showDetail(id) {
+  _selectedDeviceId = id;
+  const res  = await fetch(`/api/devices/${id}`);
+  const d    = await res.json();
+  const panel = document.getElementById('device-detail-panel');
+  panel.classList.add('show');
+  document.getElementById('detail-title').textContent = `${d.hostname || d.ip || d.mac}`;
+  document.getElementById('detail-grid').innerHTML = `
+    <div class="detail-item"><label>IP</label><span><code>${d.ip||'—'}</code></span></div>
+    <div class="detail-item"><label>MAC</label><span><code>${d.mac}</code></span></div>
+    <div class="detail-item"><label>Hostname</label><span>${escapeHtml(d.hostname)||'—'}</span></div>
+    <div class="detail-item"><label>Vendor</label><span>${escapeHtml(d.vendor)||'Unknown'}</span></div>
+    <div class="detail-item"><label>OS</label><span>${escapeHtml(d.os_guess)||'Unknown'}</span></div>
+    <div class="detail-item"><label>First Seen</label><span>${timeAgo(d.first_seen)}</span></div>
+    <div class="detail-item"><label>Last Seen</label><span>${timeAgo(d.last_seen)}</span></div>
+    <div class="detail-item"><label>Tags</label><span>${(d.tags||[]).map(t=>`<span class="tag">${escapeHtml(t)}</span>`).join('')||'—'}</span></div>
+    <div class="detail-item" style="grid-column:span 2"><label>Note</label><span>${escapeHtml(d.notes)||'—'}</span></div>
+  `;
+  const DANGEROUS_PORTS = [23,21,139,445,3389];
+  document.getElementById('detail-ports').innerHTML = (d.open_ports||[]).map(p => {
+    const cls = DANGEROUS_PORTS.includes(p.port) ? 'port-pill dangerous' : 'port-pill';
+    return `<span class="${cls}" title="${escapeHtml(p.service)} ${escapeHtml(p.version)}">${p.port}/${p.proto} ${escapeHtml(p.service)}</span>`;
+  }).join('') || '<span class="text-muted">No open ports found</span>';
+  document.getElementById('detail-dns').innerHTML = (d.dns_queries||[]).slice(0,20).map(q =>
+    `<div style="padding:3px 0;border-bottom:1px solid #21262d;font-size:12px">
+      <code>${escapeHtml(q.domain)}</code>
+      <span class="text-muted"> (${q.qtype}) — ${timeAgo(q.timestamp)}</span>
+      ${q.flagged ? '<span class="text-red"> ⚠ flagged</span>' : ''}
+    </div>`
+  ).join('') || '<span class="text-muted">No DNS queries logged</span>';
+  document.getElementById('note-input').value = d.notes || '';
+}
+
+function closeDetail() {
+  document.getElementById('device-detail-panel').classList.remove('show');
+  _selectedDeviceId = null;
+}
+
+async function addTag() {
+  if (!_selectedDeviceId) return;
+  const tag = document.getElementById('tag-input').value.trim();
+  if (!tag) return;
+  await fetch(`/api/devices/${_selectedDeviceId}/tag`, {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({tag})
+  });
+  document.getElementById('tag-input').value = '';
+  showDetail(_selectedDeviceId);
+}
+
+async function saveNote() {
+  if (!_selectedDeviceId) return;
+  const note = document.getElementById('note-input').value.trim();
+  await fetch(`/api/devices/${_selectedDeviceId}/note`, {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({note})
+  });
+  showToast('Note saved', 'INFO');
+}
+
+function renderCharts(devs) {
+  // Vendor chart
+  const vendors = {};
+  devs.forEach(d => { const v = d.vendor||'Unknown'; vendors[v] = (vendors[v]||0)+1; });
+  const topVendors = Object.entries(vendors).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  renderPieChart('vendor-chart', Object.fromEntries(topVendors));
+  // OS chart
+  const oses = {};
+  devs.forEach(d => {
+    let os = 'Unknown';
+    if (d.os_guess) {
+      if (/windows/i.test(d.os_guess)) os='Windows';
+      else if (/linux/i.test(d.os_guess)) os='Linux';
+      else if (/mac|ios|apple/i.test(d.os_guess)) os='Apple';
+      else if (/android/i.test(d.os_guess)) os='Android';
+      else os=d.os_guess.split(' ')[0];
+    }
+    oses[os] = (oses[os]||0)+1;
+  });
+  renderPieChart('os-chart', oses);
+}
+
+loadDevices();
+document.getElementById('dev-search').addEventListener('keyup', () => renderDevices(_allDevices));
+document.getElementById('dev-filter-status').addEventListener('change', () => renderDevices(_allDevices));
+nwSocket.on('device_event', () => loadDevices());
+setInterval(loadDevices, 30000);
+</script>
+{% endblock %}
